@@ -87,13 +87,16 @@ X.append(torch.tensor([0 for i in range(MAX_SEQUENCE_LENGTH)]))
 # print(X)
 
 # print(pd.DataFrame(X))
+#在前填充 使得矩阵前部分为0
 tempX=[]
 for i in X:
     t=F.pad(i,(MAX_SEQUENCE_LENGTH-len(i),0))
     tempX.append(t)
 
+#最后一行数据都是0 直接删除
 tempX.pop()
 
+#生成张量
 X=torch.cat(tempX,0).view(-1,MAX_SEQUENCE_LENGTH)
 # X = pad_sequence(X).T[:]
 
@@ -160,30 +163,24 @@ class pyt_SpatialDropout(nn.Module):
     def _make_noises(self, inputs):
         return inputs.new().resize_(self.noise_shape)
 
-
 class LSTMnet(nn.Module):
-    def __init__(self, output_size, hidden_dim, bidirectional):
+    def __init__(self, output_size, hidden_dim,embedding_dim, bidirectional):
         super(LSTMnet, self).__init__()
-
         self.output_size = output_size
-
-        self.Embedding = nn.Embedding(MAX_NB_WORDS, EMBEDDING_DIM)
-        #pytorch Dropout2d等效keras SpatialDropout
-        self.dropout2d = nn.Dropout2d(0.2)
-
-        self.lstm = nn.LSTM(input_size=EMBEDDING_DIM, hidden_size=hidden_dim, dropout=0.2, bidirectional=True,num_layers=2)
+        self.liner1_input_size=hidden_dim*2 if bidirectional else hidden_dim
+        self.Embedding = nn.Embedding(MAX_NB_WORDS, embedding_dim)
+        self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, dropout=0.2, bidirectional=bidirectional,num_layers=2)
         self.dropout1 = nn.Dropout(0.25)
-        self.linear1 = nn.Linear(EMBEDDING_DIM*2, 64)
+        self.linear1 = nn.Linear(self.liner1_input_size, 64)
         self.dropout2 = nn.Dropout(0.3)
         self.linear2 = nn.Linear(64, output_size)
         self.sig = nn.Sigmoid()
 
     def forward(self,x):
         x=self.Embedding(x)
-        # print(x.shape)
         lstm_out,hidden = self.lstm(x)
         # print(lstm_out.shape)
-        lstm_out=lstm_out[:,-1]
+        lstm_out=lstm_out[:,-1] #取最后一步输出
         # print(lstm_out.shape)
         out=self.dropout1(lstm_out)
         out=self.linear1(out)
@@ -193,33 +190,6 @@ class LSTMnet(nn.Module):
         # print(out.shape)
         out=self.sig(out)
         return out
-    # def forward(self, x):
-    #     batch_size = x.size()
-    #
-    #     x = x.long()
-    #
-    #     x = self.Embedding(x)
-    #
-    #     # x = self.dropout2d(x)
-    #     lstm_out, hidden = self.lstm(x)
-    #     out = self.dropout1(lstm_out)
-    #     print(out.shape)
-    #     out = self.linear1(out)
-    #     print(out.shape)
-    #     out = self.dropout2(out)
-    #     out = self.linear2(out)
-    #     print(out.shape)
-    #     sig_out = self.sig(out)
-    #     print(sig_out.shape)
-    #     sig_out = torch.max(sig_out, 2)[1]
-    #     print(sig_out.shape)
-    #     # reshape to be batch_size first
-    #     sig_out = sig_out.view(batch_size, -1)
-    #     sig_out = sig_out[:, -1]  # get last batch of labels
-    #     print(sig_out.shape)
-    #     # return last sigmoid output and hidden state
-    #     return sig_out, hidden
-
 
 
 # 训练模型
@@ -232,16 +202,16 @@ batch_size = 1200
 now_time = time.time()
 
 model = LSTMnet(output_size=5,
-                hidden_dim=128,
-                bidirectional=False)
-
+                hidden_dim=50,
+                embedding_dim=EMBEDDING_DIM,
+                bidirectional=True)
 
 loss_function = nn.CrossEntropyLoss()
 
 optimizer = Adam(model.parameters(),
-                 lr=0.001,
+                 lr=0.01,
                  betas=(0.9, 0.999),
-                 eps=1e-08,
+                 eps=1e-8,
                  weight_decay=0,
                  amsgrad=False)
 
@@ -251,19 +221,22 @@ reduce_lr = ReduceLROnPlateau(optimizer,
                               patience=5,
                               min_lr=0.001)
 # X_train=X_train.t()
+#通过dataloader实现分批次训练
 train_dataset = TensorDataset(X_train,Y_train)
 train_dataloader = DataLoader(dataset=train_dataset,batch_size=batch_size,shuffle=True)
 
-# data = Variable(torch.Tensor(X_train))
-# target0 = Variable(torch.Tensor(Y_train))
-#
-# target1 = torch.zeros(len(target0), 5)
-# index = target0.long().view(-1, 1)
-# target = target1.scatter_(dim=1, index=index, value=1)
+test_dataset = TensorDataset(X_test,Y_test)
+test_dataloader = DataLoader(dataset=test_dataset,batch_size=1200,shuffle=True)
 
+#记录用于绘图
+Train_loss=[]
+Train_accu=[]
+Test_loss =[]
+Test_accu =[]
 
-hisloss=[]
-hisaccu=[]
+#到device上训练
+model.to(device)
+loss_function.to(device)
 
 for epoch in range(epochs):
     model.train()
@@ -272,53 +245,61 @@ for epoch in range(epochs):
     for i,data in enumerate(train_dataloader):
         inputs,labels=data
         inputs,labels= Variable(inputs),Variable(labels)
+        inputs=inputs.to(device)
+        labels=labels.to(device)
         outputs=model(inputs)
         # print(outputs.shape,labels.shape)
         optimizer.zero_grad()
         loss=loss_function(outputs,labels)
         loss.backward()
+        #如果创建了lr_scheduler对象之后，先调用scheduler.step()，再调用optimizer.step()，则会跳过了第一个学习率的值。
+        # 调用顺序
+        # loss.backward()
+        # optimizer.step()
+        # scheduler.step()
+        optimizer.step()
         reduce_lr.step(loss)
         _,preds=outputs.max(1)
         correct=preds.eq(labels).sum().item()/len(labels)
         train_loss+=loss.item()
 
-    hisloss.append(train_loss)
-    hisaccu.append(100 * correct)
+    Train_loss.append(train_loss)
+    Train_accu.append(100 * correct)
     print("Epoch : {} ,Train_loss : {:.6f}".format(epoch, train_loss))
-    print('Accuracy : {:.6f}'.format(100 * correct))
-# for epoch in range(epochs):
-#     model.train()
-#     output, hidden = model(data)
-#     output1 = torch.zeros(len(target), 5)
-#     index = output.long().view(-1, 1)
-#     output = output1.scatter_(dim=1, index=index, value=1)
-#     print(output.shape)
-#     print(output1.shape)
-#     optimizer.zero_grad()
-#     loss = loss_function(output, target)
-#     loss = loss.requires_grad_()
-#     loss.backward()
-#     reduce_lr.step(loss)
-#
-#     # optimizer.step()
-#
-#     num_correct = torch.eq(output, target).sum().float().item()
-#     print(num_correct, len(target))
-#     print(
-#         "Train Epoch: {}\t Loss: {:.6f}\t Acc: {:.6f}".format(epoch, loss.item(), (num_correct / len(target) - 3) / 2))
-#
-#     hisloss.append(loss.item())
-#     hisaccu.append((num_correct / len(target) - 3) / 2)
+    print('Train_Accuracy : {:.6f}'.format(100 * correct))
+
+    model.eval()
+    with torch.no_grad():
+        test_accu=0
+        test_loss=0
+        for i,data in enumerate(test_dataloader):
+            inputs, labels = data
+            inputs, labels = Variable(inputs), Variable(labels)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = model(inputs)
+            # print(outputs.shape,labels.shape)
+            loss = loss_function(outputs, labels)
+            _, preds = outputs.max(1)
+            correct = preds.eq(labels).sum().item() / len(labels)
+            test_loss += loss.item()
+        Test_loss.append(test_loss)
+        Test_accu.append(100*correct)
+        print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
+        print('Test_Accuracy : {:.6f}'.format(100 * correct))
+
 
 total_time = time.time() - now_time
 print("total time is: ", total_time)
-#绘制损失图像
-plt.title('Train_Loss')
-plt.plot(hisloss, label='train')
+#绘制训练结果图像
+plt.title('Train_process')
+plt.plot(range(epochs),Train_loss, label='train_loss',color='b')
+plt.plot(range(epochs),Train_accu, label='train_accu',color='r')
 plt.legend()
 plt.show()
-#绘制准确率图像
-plt.title('Train_Accuracy')
-plt.plot(hisaccu, label='validation')
+#绘制测试结果图像
+plt.title('Test_process')
+plt.plot(range(epochs), Test_loss, label='test_loss',color='b')
+plt.plot(range(epochs), Test_accu, label='test_accu',color='r')
 plt.legend()
 plt.show()
