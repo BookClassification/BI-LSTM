@@ -177,10 +177,13 @@ class LSTMnet(nn.Module):
         self.sig = nn.Sigmoid()
 
     def forward(self,x):
+        # lstm输入应该是seq_len,batch，embedding_dim 所以在这先取转置
+        x=x.t()
         x=self.Embedding(x)
+        # print(x.shape)
         lstm_out,hidden = self.lstm(x)
         # print(lstm_out.shape)
-        lstm_out=lstm_out[:,-1] #取最后一步输出
+        lstm_out=lstm_out[-1] #取最后一步输出
         # print(lstm_out.shape)
         out=self.dropout1(lstm_out)
         out=self.linear1(out)
