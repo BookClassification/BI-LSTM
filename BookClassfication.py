@@ -24,19 +24,26 @@ print("在 cat 列中总共有 %d 个空值." % df['cat'].isnull().sum())
 print("在 keyword 列中总共有 %d 个空值." % df['keyword'].isnull().sum())
 
 mpl.rcParams['font.sans-serif'] = ['SimHei']
+
+# 将data_count由Series先转换为dict再制作成DataFrame，以便绘制图表
 data_count = df['cat'].value_counts()
 data_count = {'cat': data_count.index, 'count': data_count}
 df_cat = pd.DataFrame(data=data_count).reset_index(drop=True)
 print(df_cat)
+
 df_cat.plot(x='cat', y='count', kind='bar', legend=False, figsize=(7, 5))
 plt.title(u"类目分布")
 plt.ylabel(u'数量', fontsize=18)
 plt.xlabel(u'类目', fontsize=18)
 plt.show()
+
+# 增加一列cat_id，为对应种类的id值
 df['cat_id'] = df['cat'].factorize()[0]
 
+# 降重、排序、重置索引
 cat_id_df = df[['cat', 'cat_id']].drop_duplicates().sort_values('cat_id').reset_index(drop=True)
 
+# 种类与其id值互相映射的字典
 cat_to_id = dict(cat_id_df.values)
 id_to_cat = dict(cat_id_df[['cat_id', 'cat']].values)
 
