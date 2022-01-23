@@ -1,7 +1,6 @@
 import re
 import time
 from itertools import repeat
-
 import jieba as jb
 import matplotlib as mpl
 import numpy as np
@@ -9,6 +8,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch.autograd import Variable
@@ -16,8 +16,9 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from torchnlp.encoders.text import StaticTokenizerEncoder
+from torch.utils.tensorboard import SummaryWriter
 
-df = pd.read_csv("dataset.csv", encoding="gb18030")
+df = pd.read_csv("dataset.csv", encoding="utf8")
 df = df[['cat', 'keyword']]
 print("数据总量: %d ." % len(df))
 print("在 cat 列中总共有 %d 个空值." % df['cat'].isnull().sum())
@@ -182,6 +183,8 @@ class LSTMnet(nn.Module):
         self.output_size = output_size
         self.liner1_input_size = hidden_dim * 2 if bidirectional else hidden_dim
         self.Embedding = nn.Embedding(MAX_NB_WORDS, embedding_dim)
+        #加入自定义层
+        self.spatialDropout=SpatialDropout(0.2)
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, dropout=0.2, bidirectional=bidirectional,
                             num_layers=2)
         self.dropout1 = nn.Dropout(0.25)
@@ -194,6 +197,8 @@ class LSTMnet(nn.Module):
         # lstm输入应该是seq_len,batch，embedding_dim 所以在这先取转置
         x = x.t()
         x = self.Embedding(x)
+
+        x = self.spatialDropout(x)
         # print(x.shape)
         lstm_out, hidden = self.lstm(x)
         # print(lstm_out.shape)
@@ -305,17 +310,73 @@ for epoch in range(epochs):
         print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
         print('Test_Accuracy : {:.6f}'.format(100 * correct))
 
+#新增一段封装为函数的训练过程，可视化通过tensorborad实现，scheduler表示学习率下降策略
+def train_and_test(epochs, model, loss_function, optimizer, train_dataloader, test_dataloader, scheduler=None,
+                   tensorboard=None,device='cpu'):
+    model.to(device)
+    loss_function.to(device)
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0
+        correct = 0
+        for i, data in enumerate(train_dataloader):
+            inputs, labels = data
+            inputs, labels = Variable(inputs), Variable(labels)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = model(inputs)
+            # print(outputs.shape,labels.shape)
+            optimizer.zero_grad()
+            loss = loss_function(outputs, labels)
+            loss.backward()
+            # 如果创建了lr_scheduler对象之后，先调用scheduler.step()，再调用optimizer.step()，则会跳过了第一个学习率的值。
+            # 调用顺序
+            # loss.backward()
+            # optimizer.step()
+            # scheduler.step()
+            optimizer.step()
+            if (scheduler is not None):
+                scheduler.step(loss)
+            _, preds = outputs.max(1)
+            correct = preds.eq(labels).sum().item() / len(labels)
+            train_loss += loss.item()
+        if(tensorboard is not None):
+            tensorboard.add_scalar("train_loss", train_loss, epoch)
+            tensorboard.add_scalar("train_accu", 100 * correct, epoch)
+        print("Epoch : {} ,Train_loss : {:.6f}".format(epoch, train_loss))
+        print('Train_Accuracy : {:.6f}'.format(100 * correct))
+
+        model.eval()
+        with torch.no_grad():
+            test_loss = 0
+            for i, data in enumerate(test_dataloader):
+                inputs, labels = data
+                inputs, labels = Variable(inputs), Variable(labels)
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+                outputs = model(inputs)
+                # print(outputs.shape,labels.shape)
+                loss = loss_function(outputs, labels)
+                _, preds = outputs.max(1)
+                correct = preds.eq(labels).sum().item() / len(labels)
+                test_loss += loss.item()
+            if(tensorboard is not None):
+               tensorboard.add_scalar("test_loss", test_loss, epoch)
+               tensorboard.add_scalar("test_accu", 100 * correct, epoch)
+            print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
+            print('Test_Accuracy : {:.6f}'.format(100 * correct))
+
 total_time = time.time() - now_time
 print("total time is: ", total_time)
 # 绘制训练结果图像
-plt.title('Train_process')
+plt.title('Loss_figure')
 plt.plot(range(epochs), Train_loss, label='train_loss', color='b')
-plt.plot(range(epochs), Train_accu, label='train_accu', color='r')
+plt.plot(range(epochs), Test_loss, label='test_loss', color='r')
 plt.legend()
 plt.show()
 # 绘制测试结果图像
-plt.title('Test_process')
-plt.plot(range(epochs), Test_loss, label='test_loss', color='b')
+plt.title('Accracy_figure')
+plt.plot(range(epochs), Train_accu, label='train_accu', color='b')
 plt.plot(range(epochs), Test_accu, label='test_accu', color='r')
 plt.legend()
 plt.show()
