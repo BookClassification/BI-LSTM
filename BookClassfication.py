@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torchnlp.encoders.text import StaticTokenizerEncoder
 from torch.utils.tensorboard import SummaryWriter
 
-df = pd.read_csv("dataset.csv", encoding="utf8")
+df = pd.read_csv("dataset26p.csv", encoding="utf8")
 df = df[['cat', 'keyword']]
 print("数据总量: %d ." % len(df))
 print("在 cat 列中总共有 %d 个空值." % df['cat'].isnull().sum())
@@ -77,7 +77,7 @@ df['cut_keyword'] = df['clean_keyword'].apply(lambda x: " ".join([w for w in lis
 print(df.head())
 
 # 设置最频繁使用的30000个词
-MAX_NB_WORDS = 30000
+MAX_NB_WORDS = 160000
 
 # 每条cut_keyword最大的长度50
 MAX_SEQUENCE_LENGTH = 50
@@ -184,7 +184,7 @@ class LSTMnet(nn.Module):
         self.liner1_input_size = hidden_dim * 2 if bidirectional else hidden_dim
         self.Embedding = nn.Embedding(MAX_NB_WORDS, embedding_dim)
         #加入自定义层
-        self.spatialDropout=SpatialDropout(0.2)
+        # self.spatialDropout=SpatialDropout(0.2)
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, dropout=0.2, bidirectional=bidirectional,
                             num_layers=2)
         self.dropout1 = nn.Dropout(0.25)
@@ -197,8 +197,7 @@ class LSTMnet(nn.Module):
         # lstm输入应该是seq_len,batch，embedding_dim 所以在这先取转置
         x = x.t()
         x = self.Embedding(x)
-
-        x = self.spatialDropout(x)
+        # x = self.spatialDropout(x)
         # print(x.shape)
         lstm_out, hidden = self.lstm(x)
         # print(lstm_out.shape)
@@ -217,13 +216,13 @@ class LSTMnet(nn.Module):
 # 训练模型
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-epochs = 20
+epochs = 100
 
 batch_size = 1200
 
 now_time = time.time()
 
-model = LSTMnet(output_size=5,
+model = LSTMnet(output_size=21,
                 hidden_dim=50,
                 embedding_dim=EMBEDDING_DIM,
                 bidirectional=True)
@@ -231,7 +230,7 @@ model = LSTMnet(output_size=5,
 loss_function = nn.CrossEntropyLoss()
 
 optimizer = Adam(model.parameters(),
-                 lr=0.01,
+                 lr=0.001,
                  betas=(0.9, 0.999),
                  eps=1e-8,
                  weight_decay=0,
@@ -287,7 +286,7 @@ for epoch in range(epochs):
 
     Train_loss.append(train_loss)
     Train_accu.append(100 * correct)
-    print("Epoch : {} ,Train_loss : {:.6f}".format(epoch, train_loss))
+    print("Epoch : {} \nTrain_loss : {:.6f}".format(epoch, train_loss))
     print('Train_Accuracy : {:.6f}'.format(100 * correct))
 
     model.eval()
@@ -310,61 +309,61 @@ for epoch in range(epochs):
         print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
         print('Test_Accuracy : {:.6f}'.format(100 * correct))
 
-#新增一段封装为函数的训练过程，可视化通过tensorborad实现，scheduler表示学习率下降策略
-def train_and_test(epochs, model, loss_function, optimizer, train_dataloader, test_dataloader, scheduler=None,
-                   tensorboard=None,device='cpu'):
-    model.to(device)
-    loss_function.to(device)
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0
-        correct = 0
-        for i, data in enumerate(train_dataloader):
-            inputs, labels = data
-            inputs, labels = Variable(inputs), Variable(labels)
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            outputs = model(inputs)
-            # print(outputs.shape,labels.shape)
-            optimizer.zero_grad()
-            loss = loss_function(outputs, labels)
-            loss.backward()
-            # 如果创建了lr_scheduler对象之后，先调用scheduler.step()，再调用optimizer.step()，则会跳过了第一个学习率的值。
-            # 调用顺序
-            # loss.backward()
-            # optimizer.step()
-            # scheduler.step()
-            optimizer.step()
-            if (scheduler is not None):
-                scheduler.step(loss)
-            _, preds = outputs.max(1)
-            correct = preds.eq(labels).sum().item() / len(labels)
-            train_loss += loss.item()
-        if(tensorboard is not None):
-            tensorboard.add_scalar("train_loss", train_loss, epoch)
-            tensorboard.add_scalar("train_accu", 100 * correct, epoch)
-        print("Epoch : {} ,Train_loss : {:.6f}".format(epoch, train_loss))
-        print('Train_Accuracy : {:.6f}'.format(100 * correct))
-
-        model.eval()
-        with torch.no_grad():
-            test_loss = 0
-            for i, data in enumerate(test_dataloader):
-                inputs, labels = data
-                inputs, labels = Variable(inputs), Variable(labels)
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                outputs = model(inputs)
-                # print(outputs.shape,labels.shape)
-                loss = loss_function(outputs, labels)
-                _, preds = outputs.max(1)
-                correct = preds.eq(labels).sum().item() / len(labels)
-                test_loss += loss.item()
-            if(tensorboard is not None):
-               tensorboard.add_scalar("test_loss", test_loss, epoch)
-               tensorboard.add_scalar("test_accu", 100 * correct, epoch)
-            print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
-            print('Test_Accuracy : {:.6f}'.format(100 * correct))
+# #新增一段封装为函数的训练过程，可视化通过tensorborad实现，scheduler表示学习率下降策略
+# def train_and_test(epochs, model, loss_function, optimizer, train_dataloader, test_dataloader, scheduler=None,
+#                    tensorboard=None,device='cpu'):
+#     model.to(device)
+#     loss_function.to(device)
+#     for epoch in range(epochs):
+#         model.train()
+#         train_loss = 0
+#         correct = 0
+#         for i, data in enumerate(train_dataloader):
+#             inputs, labels = data
+#             inputs, labels = Variable(inputs), Variable(labels)
+#             inputs = inputs.to(device)
+#             labels = labels.to(device)
+#             outputs = model(inputs)
+#             # print(outputs.shape,labels.shape)
+#             optimizer.zero_grad()
+#             loss = loss_function(outputs, labels)
+#             loss.backward()
+#             # 如果创建了lr_scheduler对象之后，先调用scheduler.step()，再调用optimizer.step()，则会跳过了第一个学习率的值。
+#             # 调用顺序
+#             # loss.backward()
+#             # optimizer.step()
+#             # scheduler.step()
+#             optimizer.step()
+#             if (scheduler is not None):
+#                 scheduler.step(loss)
+#             _, preds = outputs.max(1)
+#             correct = preds.eq(labels).sum().item() / len(labels)
+#             train_loss += loss.item()
+#         if(tensorboard is not None):
+#             tensorboard.add_scalar("train_loss", train_loss, epoch)
+#             tensorboard.add_scalar("train_accu", 100 * correct, epoch)
+#         print("Epoch : {} ,Train_loss : {:.6f}".format(epoch, train_loss))
+#         print('Train_Accuracy : {:.6f}'.format(100 * correct))
+#
+#         model.eval()
+#         with torch.no_grad():
+#             test_loss = 0
+#             for i, data in enumerate(test_dataloader):
+#                 inputs, labels = data
+#                 inputs, labels = Variable(inputs), Variable(labels)
+#                 inputs = inputs.to(device)
+#                 labels = labels.to(device)
+#                 outputs = model(inputs)
+#                 # print(outputs.shape,labels.shape)
+#                 loss = loss_function(outputs, labels)
+#                 _, preds = outputs.max(1)
+#                 correct = preds.eq(labels).sum().item() / len(labels)
+#                 test_loss += loss.item()
+#             if(tensorboard is not None):
+#                tensorboard.add_scalar("test_loss", test_loss, epoch)
+#                tensorboard.add_scalar("test_accu", 100 * correct, epoch)
+#             print("Epoch : {} ,Test_loss : {:.6f}".format(epoch, test_loss))
+#             print('Test_Accuracy : {:.6f}'.format(100 * correct))
 
 total_time = time.time() - now_time
 print("total time is: ", total_time)
