@@ -89,28 +89,30 @@ def remove_punctuation(line):
     return line
 
 
-def stopwords_list(filepath):
-    ret = [line.strip() for line in open(filepath, 'r', encoding='utf-8').readlines()]
-    return ret
-
-# 加载停用词
-stopwords = stopwords_list("chineseStopWords.txt")
+# def stopwords_list(filepath):
+#     ret = [line.strip() for line in open(filepath, 'r', encoding='utf-8').readlines()]
+#     return ret
+#
+# # 加载停用词
+# stopwords = stopwords_list("chineseStopWords.txt")
 
 # 删除除字母,数字，汉字以外的所有符号
 df['clean_keyword'] = df['keyword'].apply(remove_punctuation)
 
+#textrank 有分词和去停用词的功能 故无需再用jieba分词
+# # 分词，并过滤停用词
+# df['cut_keyword'] = df['clean_keyword'].apply(lambda x: " ".join([w for w in list(jb.cut(x)) if w not in stopwords]))
+
+
 start_time = time.time()
 
-# 分词，并过滤停用词
-df['cut_keyword'] = df['clean_keyword'].apply(lambda x: " ".join([w for w in list(jb.cut(x)) if w not in stopwords]))
-end_time = time.time()
-# print(df['cut_keyword'])
-print('jieba 分词用时{:.3f}s'.format(end_time-start_time))
-
-print(df.head())
-
 #取50个关键词
-result = getKeywords_textrank4zh(df,50,'cut_keyword','cat')
+result = getKeywords_textrank4zh(df,50,'clean_keyword','cat')
+print(result.head())
+
+
+end_time = time.time()
+print('关键词提取用时 {:.3f}s'.format(end_time-start_time))
 
 #取词 数量应大于等于词典大小
 MAX_NB_WORDS = 160000
